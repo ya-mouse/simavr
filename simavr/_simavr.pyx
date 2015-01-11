@@ -20,8 +20,8 @@
 #
 import threading
 from libc.stdint cimport *
-from libc.string cimport strcpy
-from qb._core cimport qb_object_t, qb_interface_t
+from libc.string cimport strcpy, strdup
+from qb._core cimport qb_object_t, qb_interface_t, qb_pin_t
 
 cdef extern from "sim_irq.h":
     ctypedef struct avr_irq_t
@@ -48,6 +48,15 @@ cdef extern from "sim_irq.h":
     cdef void avr_raise_irq(
                 avr_irq_t * irq,
                 uint32_t value) nogil
+
+    cdef void avr_connect_irq(avr_irq_t *src, avr_irq_t *dst) nogil
+
+cdef extern from "sim_io.h":
+    cdef int AVR_IOCTL_DEF(char a, char b, char c, char d) nogil
+    cdef avr_irq_t * avr_io_getirq(avr_t * avr, uint32_t ctl, int index) nogil
+
+cdef extern from "avr_ioport.h":
+    cdef int AVR_IOCTL_IOPORT_GETIRQ(char name) nogil
 
 cdef extern from "sim_avr.h":
     ctypedef uint64_t avr_cycle_count_t
@@ -125,27 +134,71 @@ cdef extern from "sim_cycle_timers.h":
                 avr_cycle_timer_t timer,
                 void * param)
 
-cdef class avr_core(qb_object_t):
+class signal(qb_pin_t):
+    def __init__(self, obj, name):
+        print(obj, type(obj), obj.alloc_irq(0, 1, name))
+
+    def signal_raise(self):
+        pass
+
+    def signal_lower(self):
+        pass
+
+cdef class signal_c(qb_pin_t):
+    cdef avr_t *_core
+    cdef avr_irq_t *_pin
+    cdef avr_irq_t *_irq
+    cdef const char *_dstname
+
+    def __cinit__(self, _avr_core obj, const char *name):
+        self._irq = NULL
+        self._pin = NULL
+        self._dstname = NULL
+        self._core = obj._core
+        if len(name) != 5:
+            raise ValueError('Wrong length of signal name: {}. Should be 5'.format(len(name)))
+
+    def __set__(self, obj, dst):
+        if self._pin == NULL:
+            self._dstname = strdup(dst.name)
+            self._pin = avr_io_getirq(self._core, AVR_IOCTL_DEF(self._name[0]+0x20, self._name[1]+0x20, self._name[2]+0x20, self._name[3]), self._name[4]-0x30)
+            self._irq = avr_alloc_irq(&self._core.irq_pool, 0, 1, &self._dstname)
+            avr_connect_irq(self._pin, self._irq)
+
+    def signal_raise(self):
+        pass
+
+    def signal_lower(self):
+        pass
+
+cdef class _avr_core(qb_object_t):
     cdef avr_t *_core
     cdef elf_firmware_t _elf
     cdef object _t
     cdef int paused
 
-    def __init__(self, name, mmcu):
-        super().__init__(name)
-        self._t = None
+    def __cinit__(self, name, mmcu):
         self._core = avr_make_mcu_by_name(bytes(mmcu, 'ascii'))
         if self._core == NULL:
             raise Exception("AVR '{}' not known".format(mmcu))
-
         strcpy(self._elf.mmcu, self._core.mmcu)
         avr_init(self._core)
+
+        # Populate pins
+        for port in ('B', 'C'):
+            for i in range(0, 7):
+                type(self)._pins['IOG%c%d' % (port, i)] = signal_c
+
+    def __init__(self, name, mmcu):
+        super().__init__(name)
+        self._t = None
 
     def load_firmware(self, filename):
         if elf_read_firmware(filename, &self._elf) == -1:
              raise Exception("Unable to load firmware from file {}".format(filename))
 
         avr_load_firmware(self._core, &self._elf)
+
 
     def _cpu_step(self):
         with nogil:
@@ -176,18 +229,18 @@ cdef class avr_core(qb_object_t):
     def mmcu(self):
         return str(self._core.mmcu, 'ascii')
 
-    cdef avr_irq_t * alloc_irq(self, int base, int count):
-        cdef char *name = "button"
-        return avr_alloc_irq(&self._core.irq_pool, base, count, &name)
+    cpdef object alloc_irq(self, int base, int count, const char *name):
+        cdef avr_irq_t *irq = avr_alloc_irq(&self._core.irq_pool, base, count, &name)
+        return None
 
 
 cdef class sim_button:
     cdef avr_irq_t * _irq
-    cdef avr_core _avr
+    cdef _avr_core _avr
 
-    def __init__(self, avr_core avr, name):
+    def __init__(self, _avr_core avr, name):
         self._avr = avr
-        self._irq = self._avr.alloc_irq(0, 1)
+#        self._irq = self._avr.alloc_irq(0, 1, bytes(name, 'ascii'))
 
     @staticmethod
     cdef avr_cycle_count_t _auto_release(avr_t *avr, avr_cycle_count_t when, void *param) with gil:
@@ -200,3 +253,25 @@ cdef class sim_button:
         avr_cycle_timer_cancel(self._avr._core, sim_button._auto_release, <void *>self)
         avr_raise_irq(self._irq + 0, 0)
         avr_cycle_timer_register_usec(self._avr._core, duration, sim_button._auto_release, <void *>self)
+
+class avr_core(_avr_core):
+#    def __new__(cls, *args, **kwargs):
+#        for port in ('B', 'C'):
+#            for i in range(0, 7):
+#                cls._pins['IOG%c%d' % (port, i)] = signal_c
+#        return super().__new__(cls, *args, **kwargs)
+    pass
+
+class charlcd_component(qb_object_t):
+    def __init__(self, name, mmcu):
+        self.o.avr = avr_core(name, mmcu)
+
+# o.but = button()
+# o.hc595 = hc595()
+# --> 
+# o.avr.pin.iogc0 = o.but.pin.irq
+# o.avr.pin['iogc0']
+# o.avr.pin.spdr1 = o.hc595.pin.i_mosi
+# o.avr.pin.iogd4 = o.hc595.pin.i_reset
+# o.avr.pin.iogd7 = o.hc595.pin.i_latch
+# --> o.but.irq_dev = o.avr
