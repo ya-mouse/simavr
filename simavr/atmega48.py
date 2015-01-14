@@ -3,13 +3,17 @@ import qb._simavr
 from time import sleep
 from threading import Thread
 
+from OpenGL.GLU import *
+from OpenGL.GL import *
+from lcd_glut import lcd_glut
+
 class hd44780_lcd(qb.qb_object_t):
     _pinstate = 0
     _datapins = 0
     _readpins = 0
     _cursor = 0
 
-    _vram = [0] * (80+64)
+    _vram = [32] * (80+64)
 
     _port = {
         'RS': 1, 'RW': 2, 'E': 3,
@@ -17,6 +21,14 @@ class hd44780_lcd(qb.qb_object_t):
         'D4': 8, 'D5': 9, 'D6': 10, 'D7': 11,
         'BUSY': 12, 'ADDR': 13, 'DATA_IN': 14, 'DATA_OUT': 15
     }
+
+    _colors = (
+        ( 0x00aa00ff, 0x00cc00ff, 0x000000ff, 0x00000055 ), # fluo green
+        ( 0xaa0000ff, 0xcc0000ff, 0x000000ff, 0x00000055 ), # red
+        ( 0x0000aaff, 0x0000ccff, 0x000000ff, 0x00000055 ), # blue
+        ( 0xaaaaaaff, 0xccccccff, 0x000000ff, 0x00000055 ), # bw
+    )
+    _colorpal = 3
 
     HD44780_FLAG_REENTRANT = False
     HD44780_FLAG_BUSY = False
@@ -40,10 +52,123 @@ class hd44780_lcd(qb.qb_object_t):
         def signal_raise(self):
             self._obj.pin_change(str(self._name, 'ascii'), 1)
 
-    def __init__(self, name):
+    def __init__(self, name, geom='20x4'):
         super().__init__(name)
+        self._lcd = lcd_glut(self, geom, 3)
+        self._font_init()
         self._reset_cursor()
         self._clear_screen()
+        self._lcd.start()
+
+    def _font_init(self):
+        class FontTexture():
+            def __init__(self):
+                from lcd_glut import font
+                self.xSize = 1280
+                self.ySize = 7
+                self.rawReference = font
+
+        self._font_texture = glGenTextures(1)
+        self._texture = FontTexture()
+        glBindTexture(GL_TEXTURE_2D, self._font_texture)
+        glTexImage2D(GL_TEXTURE_2D, 0, 4,
+                self._texture.xSize,
+                self._texture.ySize, 0, GL_RGBA,
+                GL_UNSIGNED_BYTE,
+                self._texture.rawReference)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+
+        glMatrixMode(GL_TEXTURE)
+        glLoadIdentity()
+        glScalef(1.0 / self._texture.xSize, 1.0 / self._texture.ySize, 1.0)
+
+        glMatrixMode(GL_MODELVIEW)
+
+    def draw(self):
+        border = 3
+        charwidth = 5
+        charheight = 7
+
+        def glColor32U(color):
+            glColor4f(
+                ((color >> 24) & 0xff) / 255.0,
+                ((color >> 16) & 0xff) / 255.0,
+                ((color >> 8) & 0xff) / 255.0,
+                ((color) & 0xff) / 255.0)
+
+        def glputchar(c, character, text, shadow):
+            index = c
+            left = index * charwidth
+            right = index * charwidth + charwidth
+            top = 0
+            bottom = 7
+
+            glEnable(GL_BLEND)
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+
+            glDisable(GL_TEXTURE_2D)
+            glColor32U(character)
+            glBegin(GL_QUADS)
+            glVertex3i(5, 7, 0)
+            glVertex3i(0, 7, 0)
+            glVertex3i(0, 0, 0)
+            glVertex3i(5, 0, 0)
+            glEnd()
+
+            glEnable(GL_BLEND)
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+
+            glEnable(GL_TEXTURE_2D)
+            glBindTexture(GL_TEXTURE_2D, self._font_texture)
+
+            if shadow:
+                glColor32U(shadow)
+                glPushMatrix()
+                glTranslatef(0.2, 0.2, 0)
+                glBegin(GL_QUADS)
+                glTexCoord2i(right, top);       glVertex3i(5, 0, 0)
+                glTexCoord2i(left, top);        glVertex3i(0, 0, 0)
+                glTexCoord2i(left, bottom);     glVertex3i(0, 7, 0)
+                glTexCoord2i(right, bottom);    glVertex3i(5, 7, 0)
+                glEnd()
+                glPopMatrix()
+
+            glColor32U(text)
+            glBegin(GL_QUADS)
+            glTexCoord2i(right, top);           glVertex3i(5, 0, 0)
+            glTexCoord2i(left, top);            glVertex3i(0, 0, 0)
+            glTexCoord2i(left, bottom);         glVertex3i(0, 7, 0)
+            glTexCoord2i(right, bottom);        glVertex3i(5, 7, 0)
+            glEnd()
+
+        rows = self._lcd.width
+        lines = self._lcd.height
+        background, character, text, shadow = self._colors[self._colorpal]
+
+        glDisable(GL_TEXTURE_2D)
+        glDisable(GL_BLEND)
+        glColor32U(background)
+        glTranslatef(border, border, 0)
+        glBegin(GL_QUADS)
+        glVertex3f(rows * charwidth + (rows - 1) + border, -border, 0)
+        glVertex3f(-border, -border, 0)
+        glVertex3f(-border, lines * charheight + (lines - 1) + border, 0)
+        glVertex3f(rows * charwidth + (rows - 1) + border, lines * charheight
+                + (lines - 1) + border, 0)
+        glEnd()
+
+        glColor3f(1.0, 1.0, 1.0)
+        offset = ( 0, 0x40, 0x20, 0x60 )
+        for v in range(0, lines):
+            glPushMatrix()
+            for i in range(0, rows):
+                glputchar(self._vram[offset[v] + i], character, text, shadow)
+                glTranslatef(6, 0, 0)
+            glPopMatrix()
+            glTranslatef(0, 8, 0)
+
+        self.HD44780_FLAG_DIRTY = False
 
     def pin_change(self, signal, value):
         old = self._pinstate
@@ -59,11 +184,13 @@ class hd44780_lcd(qb.qb_object_t):
         if not (not eo and e):
             return
 
+        '''
         print('LCD: %04x %04x %c %c %c %c' % (self._pinstate, 0,
             'R' if self._pinstate & (1 << self._port['RW']) else 'W',
             'D' if self._pinstate & (1 << self._port['RS']) else 'C',
             'L' if self.HD44780_FLAG_LOWNIBBLE else 'H',
             'B' if self.HD44780_FLAG_BUSY else ' '))
+        '''
 
         self.HD44780_FLAG_REENTRANT = True
 
@@ -89,7 +216,7 @@ class hd44780_lcd(qb.qb_object_t):
         # avr_raise_irq(b->irq + IRQ_HD44780_ADDR, b->cursor)
 
     def _clear_screen(self):
-        self._vram[0:79] = (' ')*80
+        self._vram[0:79] = (32,)*80
         self.HD44780_FLAG_DIRTY = True
         # avr_raise_irq(b->irq + IRQ_HD44780_ADDR, b->cursor)
 
@@ -116,7 +243,7 @@ class hd44780_lcd(qb.qb_object_t):
                 break
             top -= 1
 
-        print('write_command %02x (%d)' % (self._datapins, top))
+        #print('write_command %02x (%d)' % (self._datapins, top))
         # Clear display
         if top == 0:
             self._clear_screen()
@@ -158,8 +285,7 @@ class hd44780_lcd(qb.qb_object_t):
 
     def write_data(self):
         self._vram[self._cursor] = self._datapins
-        print('write_data')
-        print(self._cursor, self._datapins)
+        #print('write_data')
         if self.HD44780_FLAG_S_C:
             # TODO: display shift
             pass
@@ -273,9 +399,9 @@ class ac_input(qb.qb_object_t):
         while True:
             sleep(1.0 / 50.0)
             if value:
-                self.pin['ac'].dst.signal_raise()
+                self.pin['ac_input'].dst.signal_raise()
             else:
-                self.pin['ac'].dst.signal_lower()
+                self.pin['ac_input'].dst.signal_lower()
             value = not value
 
     def pin_change(self, name, value):
@@ -286,7 +412,7 @@ class ac_input(qb.qb_object_t):
         self._t = Thread(target=self._switch_auto, daemon=True)
 
     def __new__(cls, *args, **kwargs):
-        cls._pins['ac'] = ac_input.signal
+        cls._pins['ac_input'] = ac_input.signal
         return super().__new__(cls, *args, **kwargs)
 
 class charlcd_component(qb.qb_object_t):
@@ -294,9 +420,9 @@ class charlcd_component(qb.qb_object_t):
         super().__init__(name)
         self.o.avr = qb._simavr.avr_core(name, mmcu)
         self.o.lcd = hd44780_lcd('HD44780')
-        self.o.ac  = ac_input('ACinput')
+        self.o.ac  = ac_input('AC-input')
 
-        self.o.ac.pin['ac'] = self.o.avr.pin['IOGD2']
+        self.o.ac.pin['ac_input'] = self.o.avr.pin['IOGD2']
         for i in range(0, 4):
             self.o.avr.pin['IOGB%d' % i] = self.o.lcd.pin['D%d' % (4+i)]
             self.o.lcd.pin['D%d' % (4+i)] = self.o.avr.pin['IOGB%d' % i]
