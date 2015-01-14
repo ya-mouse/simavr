@@ -201,11 +201,9 @@ cdef class signal_avr(qb_pin_t):
             _this.dst.signal_lower()
 
     cpdef object signal_raise(self):
-        print('AVR HI', self._name)
         avr_raise_irq(self._irq, 1)
 
     cpdef object signal_lower(self):
-        print('AVR LO', self._name)
         avr_raise_irq(self._irq, 0)
 
 cdef class _avr_core(qb_object_t):
