@@ -174,19 +174,20 @@ cdef class signal_avr(qb_pin_t):
         self._pin = NULL
         self._dstname = NULL
         self._core = obj._core
+        self._name = name
         if len(name) != 5:
             raise ValueError('Wrong length of signal name: {}. Should be 5'.format(len(name)))
+        self._pin = avr_io_getirq(self._core, AVR_IOCTL_DEF(self._name[0]+0x20, self._name[1]+0x20, self._name[2]+0x20, self._name[3]), self._name[4]-0x30)
 
     def __dealloc__(self):
         if self._dstname != NULL:
             free(<void *>self._dstname)
 
     def __set__(self, obj, dst):
-        if self._pin == NULL:
+        if self._irq == NULL:
             self.dst = dst
             print(obj, dst)
             self._dstname = strdup(dst.name)
-            self._pin = avr_io_getirq(self._core, AVR_IOCTL_DEF(self._name[0]+0x20, self._name[1]+0x20, self._name[2]+0x20, self._name[3]), self._name[4]-0x30)
             self._irq = avr_alloc_irq(&self._core.irq_pool, 0, 1, &self._dstname)
             avr_irq_register_notify(self._irq, signal_avr._pin_change_hook, <void *>self);
             avr_connect_irq(self._pin, self._irq)
@@ -201,10 +202,10 @@ cdef class signal_avr(qb_pin_t):
             _this.dst.signal_lower()
 
     cpdef object signal_raise(self):
-        avr_raise_irq(self._irq, 1)
+        avr_raise_irq(self._pin, 1)
 
     cpdef object signal_lower(self):
-        avr_raise_irq(self._irq, 0)
+        avr_raise_irq(self._pin, 0)
 
 cdef class _avr_core(qb_object_t):
     cdef avr_t *_core
@@ -220,7 +221,7 @@ cdef class _avr_core(qb_object_t):
         avr_init(self._core)
 
         # Populate pins
-        for port in ('B', 'C'):
+        for port in ('B', 'C', 'D'):
             for i in range(0, 8):
                 type(self)._pins['IOG%c%d' % (port, i)] = signal_avr
 
