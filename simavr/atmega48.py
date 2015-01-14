@@ -1,5 +1,7 @@
 import qb
 import qb._simavr
+from time import sleep
+from threading import Thread
 
 class hd44780_lcd(qb.qb_object_t):
     _pinstate = 0
@@ -46,10 +48,9 @@ class hd44780_lcd(qb.qb_object_t):
     def pin_change(self, signal, value):
         old = self._pinstate
 
-        print('%02x %04x %04x' % (self._port[signal], self._pinstate, value))
+#        print('%02x %04x %04x' % (self._port[signal], self._pinstate, value))
 
         if self.HD44780_FLAG_REENTRANT and len(signal) == 2 and signal[0] == 'D':
-            print(signal)
             return
 
         self._pinstate = (self._pinstate & ~(1 << self._port[signal])) | (value << self._port[signal])
@@ -203,7 +204,7 @@ class hd44780_lcd(qb.qb_object_t):
 
         if done:
             # avr_raise_irq(b->irq + IRQ_HD44780_ALL, b->readpins >> 4)
-            print('ALL', self._readpins)
+            #print('ALL', self._readpins)
             for i in range(0, 4):
                 self.pin_change('D%d' % (4+i), (self._readpins >> (4+i)) & 1)
 
@@ -214,11 +215,11 @@ class hd44780_lcd(qb.qb_object_t):
             r = 4 if four else 0
             for i in range(r, 8):
                 if (self._readpins >> i) & 1:
-                    self.pin['D%d' % i].signal_raise()
+                    self.pin['D%d' % i].dst.signal_raise()
                 else:
-                    self.pin['D%d' % i].signal_lower()
+                    self.pin['D%d' % i].dst.signal_lower()
 
-        print('READ %d %04x' % (delay, self._readpins))
+        #print('READ %d %04x' % (delay, self._readpins))
         return delay
 
     def write(self):
@@ -255,11 +256,47 @@ class hd44780_lcd(qb.qb_object_t):
             cls._pins[n] = hd44780_lcd.signal
         return super().__new__(cls, *args, **kwargs)
 
+class ac_input(qb.qb_object_t):
+    class signal(qb._simavr.signal):
+        def __set__(self, obj, dst):
+            super().__set__(obj, dst)
+            self._obj._t.start()
+
+        def signal_lower(self):
+            self._obj.pin_change(str(self._name, 'ascii'), 0)
+
+        def signal_raise(self):
+            self._obj.pin_change(str(self._name, 'ascii'), 1)
+
+    def _switch_auto(self):
+        value = True
+        while True:
+            sleep(1.0 / 50.0)
+            if value:
+                self.pin['ac'].dst.signal_raise()
+            else:
+                self.pin['ac'].dst.signal_lower()
+            value = not value
+
+    def pin_change(self, name, value):
+        pass
+
+    def __init__(self, name):
+        super().__init__(name)
+        self._t = Thread(target=self._switch_auto, daemon=True)
+
+    def __new__(cls, *args, **kwargs):
+        cls._pins['ac'] = ac_input.signal
+        return super().__new__(cls, *args, **kwargs)
+
 class charlcd_component(qb.qb_object_t):
     def __init__(self, name, mmcu):
         super().__init__(name)
         self.o.avr = qb._simavr.avr_core(name, mmcu)
         self.o.lcd = hd44780_lcd('HD44780')
+        self.o.ac  = ac_input('ACinput')
+
+        self.o.ac.pin['ac'] = self.o.avr.pin['IOGD2']
         for i in range(0, 4):
             self.o.avr.pin['IOGB%d' % i] = self.o.lcd.pin['D%d' % (4+i)]
             self.o.lcd.pin['D%d' % (4+i)] = self.o.avr.pin['IOGB%d' % i]
