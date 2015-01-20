@@ -23,6 +23,7 @@ from libc.stdint cimport *
 from libc.stdlib cimport free
 from libc.string cimport strcpy, strdup
 from qb._core cimport qb_object_t, qb_interface_t, qb_pin_t
+from qb._map cimport map_interface
 
 cdef extern from "sim_irq.h":
     ctypedef struct avr_irq_t

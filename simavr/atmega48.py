@@ -1,5 +1,5 @@
 import qb
-import qb._simavr
+import simavr._avr
 from time import sleep
 from threading import Thread
 
@@ -28,7 +28,7 @@ class hd44780_lcd(qb.qb_object_t):
         ( 0x0000aaff, 0x0000ccff, 0x000000ff, 0x00000055 ), # blue
         ( 0xaaaaaaff, 0xccccccff, 0x000000ff, 0x00000055 ), # bw
     )
-    _colorpal = 3
+    _colorpal = 0
 
     HD44780_FLAG_REENTRANT = False
     HD44780_FLAG_BUSY = False
@@ -45,7 +45,7 @@ class hd44780_lcd(qb.qb_object_t):
     HD44780_FLAG_R_L = False
     HD44780_FLAG_LOWNIBBLE = False
 
-    class signal(qb._simavr.signal):
+    class signal(simavr._avr.signal):
         def signal_lower(self):
             self._obj.pin_change(str(self._name, 'ascii'), 0)
 
@@ -383,7 +383,7 @@ class hd44780_lcd(qb.qb_object_t):
         return super().__new__(cls, *args, **kwargs)
 
 class ac_input(qb.qb_object_t):
-    class signal(qb._simavr.signal):
+    class signal(simavr._avr.signal):
         def __set__(self, obj, dst):
             super().__set__(obj, dst)
             self._obj._t.start()
@@ -418,7 +418,7 @@ class ac_input(qb.qb_object_t):
 class charlcd_component(qb.qb_object_t):
     def __init__(self, name, mmcu):
         super().__init__(name)
-        self.o.avr = qb._simavr.avr_core(name, mmcu)
+        self.o.avr = simavr._avr.avr_core(name, mmcu)
         self.o.lcd = hd44780_lcd('HD44780')
         self.o.ac  = ac_input('AC-input')
 
@@ -431,11 +431,8 @@ class charlcd_component(qb.qb_object_t):
         self.o.avr.pin['IOGB5'] = self.o.lcd.pin['E']
         self.o.avr.pin['IOGB6'] = self.o.lcd.pin['RW']
 
-qb.root.o.atmega48 = qb._simavr.avr_core(None, 'atmega48')
-qb.root.o.atmega48.load_firmware(b'atmega48_ledramp.axf')
-
-qb.root.o.atmega48_2 = qb._simavr.avr_core(None, 'atmega48')
-qb.root.o.atmega48_2.load_firmware(b'atmega48_charlcd.axf')
+#qb.root.o.atmega48 = qb._simavr.avr_core(None, 'atmega48')
+#qb.root.o.atmega48.load_firmware(b'atmega48_ledramp.axf')
 
 qb.root.o.obj = charlcd_component(None, 'atmega48')
 qb.root.o.obj.o.avr.load_firmware(b'atmega48_charlcd.axf')

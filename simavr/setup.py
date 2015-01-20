@@ -36,7 +36,7 @@ class PCTBuildPy(build_py):
 include_dirs = [ 'sim' ]
 
 exts = [
-    Extension('_simavr', sources=['_simavr.pyx'], libraries = ['simavr'], library_dirs=['obj-x86_64-linux-gnu'], extra_link_args=['-Wl,-R,./obj-x86_64-linux-gnu']),
+    Extension('_avr', sources=['_avr.pyx'], libraries = ['simavr'], library_dirs=['obj-x86_64-linux-gnu'], extra_link_args=['-Wl,-R,./obj-x86_64-linux-gnu']),
 ]
 
 setup(
@@ -46,7 +46,7 @@ setup(
     author='Anton D. Kachalov',
     cmdclass={'build_py': PCTBuildPy, 'build_ext': build_ext},
     include_dirs = include_dirs,
-    ext_package='qb',
+    ext_package='simavr',
     ext_modules=cythonize(exts),
     platforms='any',
     zip_safe=False,

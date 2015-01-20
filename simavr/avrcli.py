@@ -26,7 +26,8 @@ from importlib import machinery
 qb_system=platform.system().lower()
 qb_machine=platform.machine()
 qb_pyversion=platform.python_version().rsplit('.',1)[0]
-sys.path.append('{}/build/lib.{}-{}-{}-pydebug'.format('/home/mouse/SW/qbee/cython', qb_system, qb_machine, qb_pyversion))
+sys.path.append('build/lib.{}-{}-{}-pydebug'.format(qb_system, qb_machine, qb_pyversion))
+#sys.path.append('{}/build/lib.{}-{}-{}-pydebug'.format('/home/mouse/SW/qbee/cython', qb_system, qb_machine, qb_pyversion))
 
 import qb
 
@@ -34,7 +35,7 @@ print('Starting SIMAVR...')
 
 # Start RPC dom0 server
 global dom0
-dom0 = qb.rpc.qb_dom0_server(port=18813)
+dom0 = qb.rpc.qb_dom0_server() #port=18813)
 
 t = threading.Thread(target = dom0.start)
 t.setDaemon(True)
